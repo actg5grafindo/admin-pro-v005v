@@ -9,12 +9,14 @@ import { toast } from "sonner";
 const Login = ({ role }: { role: "admin" | "submitter" }) => {
   const navigate = useNavigate();
   const [loginData, setLoginData] = useState({
-    email: "",
+    identifier: "", // Can be username, email, or phone
     password: "",
   });
   const [registerData, setRegisterData] = useState({
     name: "",
+    username: "",
     email: "",
+    phoneNumber: "",
     password: "",
     confirmPassword: "",
   });
@@ -22,7 +24,7 @@ const Login = ({ role }: { role: "admin" | "submitter" }) => {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     // This is a mock login - in real app we'd integrate with auth system
-    if (loginData.email && loginData.password) {
+    if (loginData.identifier && loginData.password) {
       localStorage.setItem("userRole", role);
       toast.success("Login successful!");
       navigate(role === "admin" ? "/admin" : "/submit");
@@ -39,7 +41,7 @@ const Login = ({ role }: { role: "admin" | "submitter" }) => {
     if (registerData.email && registerData.password && registerData.name) {
       localStorage.setItem("userRole", "submitter");
       toast.success("Registration successful! You can now login.");
-      setLoginData({ email: registerData.email, password: "" });
+      setLoginData({ identifier: registerData.email, password: "" });
     }
   };
 
@@ -61,10 +63,10 @@ const Login = ({ role }: { role: "admin" | "submitter" }) => {
             <form onSubmit={handleLogin} className="space-y-4">
               <div className="space-y-2">
                 <Input
-                  type="email"
+                  type="text"
                   placeholder="Email"
-                  value={loginData.email}
-                  onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
+                  value={loginData.identifier}
+                  onChange={(e) => setLoginData({ ...loginData, identifier: e.target.value })}
                   required
                 />
               </div>
@@ -92,10 +94,10 @@ const Login = ({ role }: { role: "admin" | "submitter" }) => {
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div className="space-y-2">
                     <Input
-                      type="email"
-                      placeholder="Email"
-                      value={loginData.email}
-                      onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
+                      type="text"
+                      placeholder="Username, Email, or Phone Number"
+                      value={loginData.identifier}
+                      onChange={(e) => setLoginData({ ...loginData, identifier: e.target.value })}
                       required
                     />
                   </div>
@@ -127,10 +129,28 @@ const Login = ({ role }: { role: "admin" | "submitter" }) => {
                   </div>
                   <div className="space-y-2">
                     <Input
+                      type="text"
+                      placeholder="Username"
+                      value={registerData.username}
+                      onChange={(e) => setRegisterData({ ...registerData, username: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Input
                       type="email"
                       placeholder="Email"
                       value={registerData.email}
                       onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Input
+                      type="tel"
+                      placeholder="Phone Number"
+                      value={registerData.phoneNumber}
+                      onChange={(e) => setRegisterData({ ...registerData, phoneNumber: e.target.value })}
                       required
                     />
                   </div>
