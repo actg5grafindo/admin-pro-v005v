@@ -1,0 +1,18 @@
+# Supabase Project Configuration
+[project]
+id = "ixtjeocobjqcqladeaqg"
+
+[auth]
+enabled = true
+site_url = "http://localhost:5050"
+
+[database]
+port = 54322
+
+[api]
+enabled = true
+port = 54321
+
+[studio]
+enabled = true
+port = 54323

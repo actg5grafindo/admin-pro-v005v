@@ -1,0 +1,38 @@
+{
+    "development": {
+        "username": "adminpro_user",
+        "password": "7OQYXHccuGsD5@R",
+        "database": "adminpro_db",
+        "host": "localhost",
+        "port": 5432,
+        "dialect": "postgresql",
+        "dialectOptions": {
+            "ssl": false
+        },
+        "pool": {
+            "max": 5,
+            "min": 0,
+            "acquire": 30000,
+            "idle": 10000
+        }
+    },
+    "test": {
+        "username": "adminpro_user",
+        "password": "7OQYXHccuGsD5@R",
+        "database": "adminpro_db_test",
+        "host": "localhost",
+        "port": 5432,
+        "dialect": "postgresql"
+    },
+    "production": {
+        "username": "adminpro_user",
+        "password": "7OQYXHccuGsD5@R",
+        "database": "adminpro_db",
+        "host": "localhost",
+        "port": 5432,
+        "dialect": "postgresql",
+        "dialectOptions": {
+            "ssl": true
+        }
+    }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "supabase-diagnostics",
+  "version": "1.0.0",
+  "description": "Supabase configuration diagnostics",
+  "scripts": {
+    "diagnose": "node diagnostics.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.3.1"
+  }
+}

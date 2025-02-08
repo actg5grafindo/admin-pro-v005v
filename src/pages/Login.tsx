@@ -1,292 +1,395 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { toast } from "sonner";
-import { Eye, EyeOff } from "lucide-react";
-import { formatDate, formatTime } from "@/utils/dateUtils";
+import React, { useState, useReducer, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
+import { supabase } from '@/lib/supabaseClient';
+import { brevoEmailService } from '@/utils/brevoEmailService';
+import { 
+  User, 
+  Mail, 
+  Lock, 
+  Eye, 
+  EyeOff,
+  Phone 
+} from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import i18n from '@/i18n';
 
-const Login = ({ role }: { role: "admin" | "submitter" }) => {
+// Define initial state type for reducer
+type State = {
+  identifier: string;
+  password: string;
+};
+
+// Define action types
+type Action = 
+  | { type: 'SET_IDENTIFIER'; payload: string }
+  | { type: 'SET_PASSWORD'; payload: string };
+
+// Reducer function
+const reducer = (state: State, action: Action): State => {
+  switch (action.type) {
+    case 'SET_IDENTIFIER':
+      return { ...state, identifier: action.payload };
+    case 'SET_PASSWORD':
+      return { ...state, password: action.payload };
+    default:
+      return state;
+  }
+};
+
+const Login = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
+
+  // Initial state
+  const initialState: State = {
+    identifier: '',
+    password: ''
+  };
+
+  // Use reducer for state management
+  const [state, dispatch] = useReducer(reducer, initialState);
+
+  // Password visibility state
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [language, setLanguage] = useState<'en' | 'id'>('en');
-  const [currentDateTime, setCurrentDateTime] = useState(new Date());
-  
-  const [loginData, setLoginData] = useState({
-    identifier: "",
-    password: "",
-  });
-  const [registerData, setRegisterData] = useState({
-    name: "",
-    username: "",
-    email: "",
-    phoneNumber: "",
-    password: "",
-    confirmPassword: "",
-  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
+  // Email verification states
+  const [isEmailVerificationRequired, setIsEmailVerificationRequired] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [otpSentTimestamp, setOtpSentTimestamp] = useState<number | null>(null);
+  const [remainingCooldown, setRemainingCooldown] = useState(0);
+
+  // Start cooldown timer for OTP resend
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentDateTime(new Date());
-    }, 1000);
+    let intervalId: NodeJS.Timeout;
+    
+    if (otpSentTimestamp) {
+      intervalId = setInterval(() => {
+        const elapsedTime = Math.floor((Date.now() - otpSentTimestamp) / 1000);
+        const remainingTime = Math.max(30 - elapsedTime, 0);
+        
+        setRemainingCooldown(remainingTime);
+        
+        if (remainingTime === 0) {
+          clearInterval(intervalId);
+        }
+      }, 1000);
+    }
+    
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [otpSentTimestamp]);
 
-    return () => clearInterval(timer);
-  }, []);
+  // Find user email based on identifier
+  const findUserEmail = async (identifier: string) => {
+    const { data, error } = await supabase
+      .from('login_identifiers')
+      .select('email')
+      .or(
+        `username.eq.${identifier},phone_number.eq.${identifier},email.eq.${identifier}`
+      )
+      .single();
 
-  const translations = {
-    en: {
-      title: role === "admin" ? "Admin Login" : "Item Code Portal",
-      description: role === "admin" 
-        ? "Enter your credentials to manage item codes"
-        : "Login or create an account to submit item codes",
-      login: "Login",
-      register: "Register",
-      createAccount: "Create Account",
-      fullName: "Full Name",
-      username: "Username",
-      email: "Email",
-      phoneNumber: "Phone Number",
-      password: "Password",
-      confirmPassword: "Confirm Password",
-      loginIdentifier: "Username, Email, or Phone Number",
-    },
-    id: {
-      title: role === "admin" ? "Login Admin" : "Portal Kode Barang",
-      description: role === "admin"
-        ? "Masukkan kredensial Anda untuk mengelola kode barang"
-        : "Login atau buat akun untuk mengajukan kode barang",
-      login: "Masuk",
-      register: "Daftar",
-      createAccount: "Buat Akun",
-      fullName: "Nama Lengkap",
-      username: "Nama Pengguna",
-      email: "Email",
-      phoneNumber: "Nomor Telepon",
-      password: "Kata Sandi",
-      confirmPassword: "Konfirmasi Kata Sandi",
-      loginIdentifier: "Nama Pengguna, Email, atau Nomor Telepon",
+    if (error || !data) {
+      throw new Error('User not found');
+    }
+
+    return data.email;
+  };
+
+  // Login handler with email verification check
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    try {
+      let email = state.identifier;
+
+      // Check if identifier is not an email (username or phone)
+      if (!state.identifier.includes('@')) {
+        email = await findUserEmail(state.identifier);
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password: state.password
+      });
+
+      if (error) throw error;
+
+      // Check email verification status
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Fetch user profile to check verification status
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('email_verified')
+        .eq('email', email)
+        .single();
+
+      if (profileError) throw profileError;
+
+      // If email is not verified, trigger verification flow
+      if (!profileData.email_verified) {
+        await handleSendVerificationOTP(email);
+        return;
+      }
+
+      // Successful login
+      navigate('/dashboard');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const t = translations[language];
+  // Send Verification OTP
+  const handleSendVerificationOTP = async (email: string) => {
+    try {
+      const { user } = await supabase.auth.getUser();
+      
+      const result = await brevoEmailService.sendVerificationOTP(
+        email, 
+        user?.id
+      );
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    // This is a mock login - in real app we'd integrate with auth system
-    if (loginData.identifier && loginData.password) {
-      localStorage.setItem("userRole", role);
-      toast.success("Login successful!");
-      navigate(role === "admin" ? "/admin" : "/submit");
+      if (result.success) {
+        // Store OTP in localStorage for verification
+        localStorage.setItem(`otp_${email}`, result.otp || '');
+        
+        toast.success('Verification OTP sent successfully');
+        setOtpSentTimestamp(Date.now());
+        setIsEmailVerificationRequired(true);
+      } else {
+        toast.error('Failed to send verification OTP');
+      }
+    } catch (error) {
+      console.error('OTP Send Error:', error);
+      toast.error('An unexpected error occurred');
     }
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  // Verify OTP
+  const handleVerifyOTP = async (email: string, userOTP: string) => {
+    try {
+      const storedOTP = localStorage.getItem(`otp_${email}`);
+      
+      if (storedOTP === userOTP) {
+        // Update email verification status in Supabase
+        const { error } = await supabase
+          .from('profiles')
+          .update({ email_verified: true })
+          .eq('email', email);
+
+        if (error) throw error;
+
+        // Clear OTP from storage
+        localStorage.removeItem(`otp_${email}`);
+
+        // Mark user as verified in auth metadata
+        await supabase.auth.updateUser({
+          data: { email_verified: true }
+        });
+
+        toast.success('Email verified successfully');
+        navigate('/dashboard');
+        return true;
+      }
+
+      toast.error('Invalid OTP. Please try again.');
+      return false;
+    } catch (error) {
+      console.error('OTP Verification Error:', error);
+      toast.error('Failed to verify email');
+      return false;
+    }
+  };
+
+  // OTP Verification handler
+  const handleOTPVerification = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (registerData.password !== registerData.confirmPassword) {
-      toast.error("Passwords do not match!");
+    setLoading(true);
+    
+    try {
+      // Find email for the original identifier
+      const email = await findUserEmail(state.identifier);
+      const isVerified = await handleVerifyOTP(email, otp);
+      
+      if (isVerified) {
+        toast.success(t('auth.login.emailVerification.verified'));
+        navigate('/dashboard');
+      } else {
+        toast.error(t('auth.login.emailVerification.invalidOTP'));
+      }
+      setLoading(false);
+    } catch (error) {
+      console.error('OTP verification error:', error);
+      toast.error(t('auth.login.error.unexpected'));
+      setLoading(false);
+    }
+  };
+
+  // Resend OTP handler
+  const handleResendOTP = async () => {
+    // Check if enough time has passed since last OTP
+    if (otpSentTimestamp && (Date.now() - otpSentTimestamp) < 60000) {
+      toast.warning(t('auth.login.emailVerification.resendCooldown'));
       return;
     }
-    // This is a mock registration - in real app we'd integrate with auth system
-    if (registerData.email && registerData.password && registerData.name) {
-      localStorage.setItem("userRole", "submitter");
-      toast.success("Registration successful! You can now login.");
-      setLoginData({ identifier: registerData.email, password: "" });
+
+    try {
+      // Find email for the original identifier
+      const email = await findUserEmail(state.identifier);
+      const otp = await handleSendVerificationOTP(email);
+      
+      if (otp) {
+        setOtp(otp);
+        toast.info(t('auth.login.emailVerification.otpResent'));
+      } else {
+        toast.error(t('auth.login.error.otpSendFailed'));
+      }
+    } catch (error) {
+      toast.error(t('auth.login.error.unexpected'));
     }
   };
 
-  return (
-    <div className="min-h-screen flex flex-col items-center bg-gray-50 px-4 relative">
-      <div className="absolute top-4 right-4">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setLanguage(language === 'en' ? 'id' : 'en')}
-          className="text-sm font-medium"
-        >
-          {language.toUpperCase()} | {language === 'en' ? 'ID' : 'EN'}
-        </Button>
+  // OTP Verification Form
+  if (isEmailVerificationRequired) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+        <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
+          <h2 className="text-2xl font-bold mb-6 text-center">
+            {t('auth.login.emailVerification.title')}
+          </h2>
+          
+          <form onSubmit={handleOTPVerification}>
+            <div className="mb-4 relative">
+              <label className="block text-gray-700 mb-2">
+                {t('auth.login.emailVerification.otpLabel')}
+              </label>
+              <Input
+                type="text"
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                maxLength={6}
+                placeholder={t('auth.login.emailVerification.otpPlaceholder')}
+                className="w-full pl-10"
+                disabled={loading}
+              />
+              <Lock className="absolute left-3 top-11 h-5 w-5 text-gray-400" />
+            </div>
+            
+            <Button 
+              type="submit" 
+              className="w-full bg-[#3a72ec] hover:bg-[#3a72ec]/90"
+              disabled={loading}
+            >
+              {loading ? t('common.loading') : t('auth.login.emailVerification.verifyButton')}
+            </Button>
+          </form>
+          
+          <div className="mt-4 text-center">
+            <button 
+              onClick={handleResendOTP}
+              className="text-blue-500 hover:underline"
+              disabled={loading || remainingCooldown > 0}
+            >
+              {remainingCooldown > 0 ? `${t('auth.login.emailVerification.resendCooldown')} (${remainingCooldown}s)` : t('auth.login.emailVerification.resendOTP')}
+            </button>
+          </div>
+        </div>
       </div>
-      
-      <div className="text-center my-8">
-        <p className="text-lg font-medium text-gray-600">
-          {formatDate(currentDateTime, language)}
-        </p>
-        <p className="text-3xl font-bold text-gray-800">
-          {formatTime(currentDateTime)}
-        </p>
-      </div>
+    );
+  }
 
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold tracking-tight">
-            {t.title}
-          </CardTitle>
-          <CardDescription>
-            {t.description}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {role === "admin" ? (
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div className="space-y-2">
-                <Input
-                  type="text"
-                  placeholder={t.email}
-                  value={loginData.identifier}
-                  onChange={(e) => setLoginData({ ...loginData, identifier: e.target.value })}
-                  required
-                />
-              </div>
-              <div className="space-y-2 relative">
-                <Input
-                  type={showPassword ? "text" : "password"}
-                  placeholder={t.password}
-                  value={loginData.password}
-                  onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
-                  required
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-2 top-1/2 -translate-y-1/2"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-              <Button type="submit" className="w-full">
-                {t.login}
-              </Button>
-            </form>
-          ) : (
-            <Tabs defaultValue="login" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="login">{t.login}</TabsTrigger>
-                <TabsTrigger value="register">{t.register}</TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="login">
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div className="space-y-2">
-                    <Input
-                      type="text"
-                      placeholder={t.loginIdentifier}
-                      value={loginData.identifier}
-                      onChange={(e) => setLoginData({ ...loginData, identifier: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2 relative">
-                    <Input
-                      type={showPassword ? "text" : "password"}
-                      placeholder={t.password}
-                      value={loginData.password}
-                      onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
-                      required
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-2 top-1/2 -translate-y-1/2"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                  <Button type="submit" className="w-full">
-                    {t.login}
-                  </Button>
-                </form>
-              </TabsContent>
-              
-              <TabsContent value="register">
-                <form onSubmit={handleRegister} className="space-y-4">
-                  <div className="space-y-2">
-                    <Input
-                      type="text"
-                      placeholder={t.fullName}
-                      value={registerData.name}
-                      onChange={(e) => setRegisterData({ ...registerData, name: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Input
-                      type="text"
-                      placeholder={t.username}
-                      value={registerData.username}
-                      onChange={(e) => setRegisterData({ ...registerData, username: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Input
-                      type="email"
-                      placeholder={t.email}
-                      value={registerData.email}
-                      onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Input
-                      type="tel"
-                      placeholder={t.phoneNumber}
-                      value={registerData.phoneNumber}
-                      onChange={(e) => setRegisterData({ ...registerData, phoneNumber: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2 relative">
-                    <Input
-                      type={showPassword ? "text" : "password"}
-                      placeholder={t.password}
-                      value={registerData.password}
-                      onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })}
-                      required
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-2 top-1/2 -translate-y-1/2"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                  <div className="space-y-2 relative">
-                    <Input
-                      type={showConfirmPassword ? "text" : "password"}
-                      placeholder={t.confirmPassword}
-                      value={registerData.confirmPassword}
-                      onChange={(e) => setRegisterData({ ...registerData, confirmPassword: e.target.value })}
-                      required
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-2 top-1/2 -translate-y-1/2"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    >
-                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                  <Button type="submit" className="w-full">
-                    {t.createAccount}
-                  </Button>
-                </form>
-              </TabsContent>
-            </Tabs>
-          )}
-        </CardContent>
-      </Card>
+  // Main Login Form
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+      <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
+        <h2 className="text-2xl font-bold mb-6 text-center">
+          {t('auth.login.title')}
+        </h2>
+        
+        <form onSubmit={handleLogin}>
+          <div className="mb-4 relative">
+            <label className="block text-gray-700 mb-2">
+              {t('auth.login.identifierLabel')}
+            </label>
+            <Input
+              type="text"
+              value={state.identifier}
+              onChange={(e) => dispatch({ type: 'SET_IDENTIFIER', payload: e.target.value })}
+              placeholder={t('auth.login.identifierPlaceholder')}
+              className="w-full pl-10"
+              disabled={loading}
+              required
+            />
+            <div className="absolute left-3 top-11 h-5 w-5 text-gray-400">
+              {state.identifier.includes('@') ? <Mail className="h-5 w-5" /> : 
+               state.identifier.match(/^\d+$/) ? <Phone className="h-5 w-5" /> : <User className="h-5 w-5" />}
+            </div>
+          </div>
+          
+          <div className="mb-4 relative">
+            <label className="block text-gray-700 mb-2">
+              {t('auth.login.passwordLabel')}
+            </label>
+            <Input
+              type={showPassword ? "text" : "password"}
+              value={state.password}
+              onChange={(e) => dispatch({ type: 'SET_PASSWORD', payload: e.target.value })}
+              placeholder={t('auth.login.passwordPlaceholder')}
+              className="w-full pl-10 pr-10"
+              disabled={loading}
+              required
+            />
+            <Lock className="absolute left-3 top-11 h-5 w-5 text-gray-400" />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-11 text-gray-400"
+            >
+              {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+            </button>
+          </div>
+          
+          <div className="mb-4 text-right">
+            <Link 
+              to="/reset-password" 
+              className="text-blue-500 hover:underline text-sm"
+            >
+              {t('auth.login.forgotPassword')}
+            </Link>
+          </div>
+          
+          <Button 
+            type="submit" 
+            className="w-full bg-[#3a72ec] hover:bg-[#3a72ec]/90"
+            disabled={loading}
+          >
+            {loading ? t('common.loading') : t('auth.login.loginButton')}
+          </Button>
+        </form>
+        
+        <div className="mt-4 text-center">
+          <p className="text-sm text-gray-600">
+            {t('auth.login.noAccount')}{' '}
+            <Link 
+              to="/register" 
+              className="text-blue-500 hover:underline"
+            >
+              {t('auth.login.registerLink')}
+            </Link>
+          </p>
+        </div>
+      </div>
     </div>
   );
 };

@@ -1,0 +1,13 @@
+{
+  "name": "admin-pro-email-template-updater",
+  "version": "1.0.0",
+  "description": "Script to update Supabase email templates",
+  "main": "update_email_template.js",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.48.0",
+    "dotenv": "^16.4.7"
+  },
+  "scripts": {
+    "update-template": "node update_email_template.js"
+  }
+}

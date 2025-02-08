@@ -1,0 +1,6 @@
+@echo off
+echo Installing dependencies...
+npm install
+
+echo Running Supabase Diagnostics...
+npm run diagnose
